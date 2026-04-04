@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: benchmark_app
+    volumes:
+      - .:/app
+      - ./data:/data
+    depends_on:
+      - postgres
+      - mysql
+      - mongodb
+      - neo4j
+    environment:
+      - POSTGRES_HOST=postgres
+      - MYSQL_HOST=mysql
+      - MONGO_HOST=mongodb
+      - NEO4J_HOST=neo4j
+
+  postgres:
+    image: postgres:17
+    container_name: benchmark_postgres
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: benchmark_db
+    volumes:
+      - ./data:/var/lib/postgresql/csv_data
+    ports:
+      - "5432:5432"
+
+  mysql:
+    image: mysql:9.0
+    container_name: benchmark_mysql
+    command: --secure-file-priv=""
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: benchmark_db
+    volumes:
+      - ./data:/var/lib/mysql-files
+    ports:
+      - "3306:3306"
+
+  mongodb:
+    image: mongo:8.0
+    container_name: benchmark_mongodb
+    environment:
+      MONGO_INITDB_DATABASE: benchmark_db
+    ports:
+      - "27017:27017"
+
+  neo4j:
+    image: neo4j:5.24
+    container_name: benchmark_neo4j
+    environment:
+      NEO4J_AUTH: neo4j/password
+      NEO4J_PLUGINS: '["apoc"]'
+    volumes:
+      - ./data:/var/lib/neo4j/import
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+
+networks:
+  default:
+    name: benchmark_network
