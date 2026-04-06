@@ -22,7 +22,6 @@ class ImportOrchestrator:
         conn = psycopg2.connect(host="postgres", user="user", password="password", dbname="benchmark_db")
         cur = conn.cursor()
 
-        # Schema without PRIMARY KEY or UNIQUE constraints
         tables = {
             "users": "id INT, username VARCHAR(255), email VARCHAR(255), password VARCHAR(255), created_at TIMESTAMP, settings_json JSONB",
             "posts": "id INT, user_id INT, content TEXT, created_at TIMESTAMP",
@@ -43,10 +42,11 @@ class ImportOrchestrator:
             cur.execute(f"DROP TABLE IF EXISTS {table} CASCADE;")
             cur.execute(f"CREATE TABLE {table} ({schema});")
             
-            # Use COPY for high speed
-            csv_path = f"/var/lib/postgresql/csv_data/{self.size}/{table}.csv"
-            with open(f"/app/data/{self.size}/{table}.csv", 'r') as f:
-                cur.copy_from(f, table, sep=',', null='')
+            # THE FIX: Use copy_expert with FORMAT CSV
+            file_path = f"/app/data/{self.size}/{table}.csv"
+            with open(file_path, 'r') as f:
+                # This command tells Postgres to handle the CSV quoting/escaping correctly
+                cur.copy_expert(f"COPY {table} FROM STDIN WITH (FORMAT CSV, QUOTE '\"', DELIMITER ',')", f)
 
             print(f"This took {time.time() - start_time}")
             start_time = time.time()
@@ -66,7 +66,6 @@ class ImportOrchestrator:
         )
         cur = conn.cursor()
         
-        # Schema without PRIMARY KEY or UNIQUE constraints
         tables = {
             "users": "id INT, username VARCHAR(255), email VARCHAR(255), password VARCHAR(255), created_at DATETIME, settings_json JSON",
             "posts": "id INT, user_id INT, content TEXT, created_at DATETIME",
@@ -87,15 +86,31 @@ class ImportOrchestrator:
             cur.execute(f"DROP TABLE IF EXISTS {table};")
             cur.execute(f"CREATE TABLE {table} ({schema});")
             
-            # MySQL LOAD DATA INFILE
             path = f"/var/lib/mysql-files/{self.size}/{table}.csv"
-            query = f"""
-                LOAD DATA INFILE '{path}' 
-                INTO TABLE {table} 
-                FIELDS TERMINATED BY ',' 
-                OPTIONALLY ENCLOSED BY '"' 
-                LINES TERMINATED BY '\n'
-            """
+            
+            if table == "users":
+                # ESCAPED BY '' is critical here to let REPLACE handle the double-quotes
+                query = f"""
+                    LOAD DATA INFILE '{path}' 
+                    INTO TABLE {table} 
+                    FIELDS TERMINATED BY ',' 
+                    OPTIONALLY ENCLOSED BY '"' 
+                    ESCAPED BY '' 
+                    LINES TERMINATED BY '\n'
+                    (id, username, email, password, created_at, @json_var)
+                    SET settings_json = REPLACE(TRIM(TRAILING '\r' FROM @json_var), '""', '"')
+                """
+            else:
+                # Use ESCAPED BY '' for all tables to remain consistent with Python CSV output
+                query = f"""
+                    LOAD DATA INFILE '{path}' 
+                    INTO TABLE {table} 
+                    FIELDS TERMINATED BY ',' 
+                    OPTIONALLY ENCLOSED BY '"' 
+                    ESCAPED BY '' 
+                    LINES TERMINATED BY '\n'
+                """
+            
             cur.execute(query)
 
             print(f"This took {time.time() - start_time}")
