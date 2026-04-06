@@ -6,9 +6,26 @@ from faker import Faker
 from datetime import datetime, timedelta
 
 # Configuration
-TAGS = ['tech', 'gaming', 'fitness', 'travel', 'food', 'coding', 'art', 'music', 'crypto', 'nature']
-GROUP_NAMES = ['Python Pros', 'Hiking Club', 'Crypto Whales', 'Healthy Eats', 'Photography 101', 
-               'Gamers United', 'World Travelers', 'Science Daily', 'Book Worms', 'Startup Hub']
+TAGS = [
+    'cooking', 'games', 'movies', 'technology', 'travel',
+    'fitness', 'art', 'music', 'photography', 'nature',
+    'fashion', 'health', 'business', 'coding', 'books',
+    'sports', 'education', 'diy', 'humor', 'news',
+    'pets', 'beauty', 'finance', 'history', 'science'
+]
+
+GROUP_NAMES = [
+    'The Foodie Collective', 'Indie Game Devs', 'Cinephile Circle', 'Weekend Hikers', 'Remote Work Hub',
+    'Startup Founders Lab', 'Digital Art Studio', 'Retro Gaming Lounge', 'Plant Parents United', 'The Bookworm Nook',
+    'Global Backpackers', 'Code & Coffee', 'Minimalist Living', 'Fitness Motivation Squad', 'Street Photography Club',
+    'Vegan Recipes Exchange', 'Stock Market Watch', 'AI & Future Tech', 'Pet Lovers Society', 'Yoga for Beginners',
+    'The Vinyl Records Club', 'Amateur Astronomers', 'DIY Home Decor', 'Creative Writing Workshop', 'Sustainable Living',
+    'Mental Health Matters', 'Sci-Fi & Fantasy Fans', 'Car Enthusiasts Network', 'Parenting Support Group', 'Urban Gardening',
+    'Solo Travelers', 'Classical Music Appreciation', 'Marathon Runners', 'Board Game Night', 'Crypto & Web3',
+    'Fashion Forward', 'History Buffs', 'Philosophy Discussions', 'Interior Design Inspo', 'Chess Masters',
+    'Podcast Creators', 'Mountain Bikers', 'Woodworking Projects', 'Language Learners', 'Makeup Artistry',
+    'Space Exploration', 'Budget Travel Tips', 'Meditation & Mindfulness', 'E-sports Arena', 'Local Community Events'
+]
 
 class DataGenerator:
     def __init__(self, size_preset='small', seed=420):
@@ -22,13 +39,13 @@ class DataGenerator:
         Faker.seed(self.seed)
         
         if size_preset == 'small':
-            self.num_users = 750
+            self.num_users = 525
             self.num_regions = 1
         elif size_preset == 'medium':
-            self.num_users = 2250
+            self.num_users = 1050
             self.num_regions = 2
         else: # big
-            self.num_users = 15000
+            self.num_users = 10500
             self.num_regions = 10
 
         self.data_dir = f"data/{size_preset}"
