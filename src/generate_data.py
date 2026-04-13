@@ -115,6 +115,7 @@ class DataGenerator:
         path = os.path.join(self.data_dir, "users.csv")
         with open(path, 'w', newline='') as f:
             writer = csv.writer(f)
+            writer.writerow(['id', 'username', 'email', 'password', 'created_at', 'settings_json'])
             for uid in self.user_ids:
                 username = f"{self.fake.user_name()}_{uid}"
                 email = f"{username}@{self.fake.free_email_domain()}"
@@ -129,6 +130,7 @@ class DataGenerator:
 
         with open(path, 'w', newline='') as f:
             writer = csv.writer(f)
+            writer.writerow(['follower_id', 'followed_id', 'created_at'])
             for uid, count in zip(self.user_ids, follower_counts):
                 count = min(count, 1000) # Safety cap
                 
@@ -169,12 +171,16 @@ class DataGenerator:
 
         with open(tags_path, 'w', newline='') as f:
             writer = csv.writer(f)
+            writer.writerow(['id', 'name'])
             for i, tag in enumerate(TAGS, 1): writer.writerow([i, tag])
 
         post_counter = 1
         with open(posts_path, 'w', newline='') as f_p, open(post_tags_path, 'w', newline='') as f_t:
             w_p = csv.writer(f_p)
+            w_p.writerow(['id', 'user_id', 'content', 'created_at'])
+            
             w_t = csv.writer(f_t)
+            w_t.writerow(['post_id', 'tag_id'])
             
             # Posts per user (Exponential)
             posts_per_user = np.random.exponential(scale=12, size=self.num_users).astype(int)
@@ -193,6 +199,11 @@ class DataGenerator:
              open(os.path.join(self.data_dir, "comment_likes.csv"), 'w', newline='') as f_cl:
             
             w_c, w_pl, w_cl = csv.writer(f_c), csv.writer(f_pl), csv.writer(f_cl)
+            
+            w_c.writerow(['id', 'post_id', 'user_id', 'content', 'created_at'])
+            w_pl.writerow(['post_id', 'user_id', 'created_at'])
+            w_cl.writerow(['comment_id', 'user_id', 'created_at'])
+            
             comment_counter = 1
 
             for pid in self.post_ids:
@@ -219,6 +230,9 @@ class DataGenerator:
         with open(os.path.join(self.data_dir, "groups.csv"), 'w', newline='') as f_g, \
              open(os.path.join(self.data_dir, "group_members.csv"), 'w', newline='') as f_gm:
             w_g, w_gm = csv.writer(f_g), csv.writer(f_gm)
+            
+            w_g.writerow(['id', 'name', 'description', 'owner_id'])
+            w_gm.writerow(['group_id', 'user_id', 'joined_at'])
 
             num_groups = max(10, self.num_users // 60)
             for gid in range(1, num_groups + 1):
