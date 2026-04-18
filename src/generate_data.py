@@ -119,7 +119,7 @@ class DataGenerator:
             for uid in self.user_ids:
                 username = f"{self.fake.user_name()}_{uid}"
                 email = f"{username}@{self.fake.free_email_domain()}"
-                writer.writerow([uid, username, email, "hash_pw", self._random_date(), '{"theme": "dark"}'])
+                writer.writerow([uid, username, email, "hash_pw", self._random_date(), f'{{"theme": "{"light" if len(email) % 4 == 0 else "dark"}"}}'])
 
     def generate_followers(self):
         print(f"[{self.size_preset}] Writing followers.csv...")

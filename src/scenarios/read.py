@@ -11,7 +11,7 @@ def r1_friends_of_friends(db_type, conn, user_id):
             WHERE f1.follower_id = %s;
         """
         cur = conn.cursor()
-        cur.execute(sql_query, (user_id,))
+        cur.execute(query, (user_id,))
         return cur.fetchall()
 
     elif db_type == 'mongodb':
