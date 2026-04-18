@@ -88,10 +88,11 @@ def r3_post_engagement(db_type, conn, post_id):
     elif db_type == 'neo4j':
         query = """
             MATCH (p:Post {id: $id})
-            OPTIONAL MATCH (p)<-[l:LIKES_POST]-()
             OPTIONAL MATCH (p)<-[:ON_POST]-(c:Comment)
-            OPTIONAL MATCH (c)<-[cl:LIKES_COMMENT]-()
-            RETURN p.id, count(DISTINCT l) as likes, c.content, count(DISTINCT cl) as comment_likes
+            RETURN p.id, 
+                   COUNT { (p)<-[:LIKES_POST]-() } as likes, 
+                   c.content, 
+                   COUNT { (c)<-[:LIKES_COMMENT]-() } as comment_likes
         """
         with conn.session() as session:
             return session.run(query, id=post_id).data()

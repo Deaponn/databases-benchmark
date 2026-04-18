@@ -97,8 +97,14 @@ def u5_update_tag_text(db_type, conn, tag_id, new_name):
 
 def u6_update_group_info(db_type, conn, group_id, name, description, new_owner_id):
     """Scenario U6: Updating group name, description, and changing the owner."""
-    if db_type in ['postgres', 'mysql']:
-        query = "UPDATE groups SET name = %s, description = %s, owner_id = %s WHERE id = %s"
+    if db_type == 'postgres':
+        query = 'UPDATE "groups" SET name = %s, description = %s, owner_id = %s WHERE id = %s'
+        cur = conn.cursor()
+        cur.execute(query, (name, description, new_owner_id, group_id))
+        conn.commit()
+
+    elif db_type == 'mysql':
+        query = "UPDATE `groups` SET name = %s, description = %s, owner_id = %s WHERE id = %s"
         cur = conn.cursor()
         cur.execute(query, (name, description, new_owner_id, group_id))
         conn.commit()

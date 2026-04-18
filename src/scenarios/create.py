@@ -87,8 +87,14 @@ def c4_add_comment(db_type, conn, data):
 
 def c5_create_group(db_type, conn, data):
     """Scenario C5: Create a new group."""
-    if db_type in ['postgres', 'mysql']:
-        query = "INSERT INTO groups (id, name, description, owner_id) VALUES (%s, %s, %s, %s)"
+    if db_type == 'postgres':
+        query = 'INSERT INTO "groups" (id, name, description, owner_id) VALUES (%s, %s, %s, %s)'
+        cur = conn.cursor()
+        cur.execute(query, data)
+        conn.commit()
+
+    elif db_type == 'mysql':
+        query = "INSERT INTO `groups` (id, name, description, owner_id) VALUES (%s, %s, %s, %s)"
         cur = conn.cursor()
         cur.execute(query, data)
         conn.commit()

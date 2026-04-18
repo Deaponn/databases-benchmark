@@ -77,10 +77,16 @@ def d4_delete_post_recursive(db_type, conn, post_id):
 
 def d5_delete_group(db_type, conn, group_id):
     """Scenario D5: Deleting a group and all its memberships."""
-    if db_type in ['postgres', 'mysql']:
+    if db_type == 'postgres':
         cur = conn.cursor()
         cur.execute("DELETE FROM group_members WHERE group_id = %s", (group_id,))
-        cur.execute("DELETE FROM groups WHERE id = %s", (group_id,))
+        cur.execute('DELETE FROM "groups" WHERE id = %s', (group_id,))
+        conn.commit()
+
+    elif db_type == 'mysql':
+        cur = conn.cursor()
+        cur.execute("DELETE FROM group_members WHERE group_id = %s", (group_id,))
+        cur.execute("DELETE FROM `groups` WHERE id = %s", (group_id,))
         conn.commit()
 
     elif db_type == 'mongodb':
@@ -107,7 +113,8 @@ def d6_nuke_user(db_type, conn, user_id):
         cur.execute("DELETE FROM comments WHERE user_id = %s OR post_id IN (SELECT id FROM posts WHERE user_id = %s)", (user_id, user_id))
         cur.execute("DELETE FROM posts WHERE user_id = %s", (user_id,))
         cur.execute("DELETE FROM followers WHERE follower_id = %s OR followed_id = %s", (user_id, user_id))
-        cur.execute("DELETE FROM group_members WHERE group_id IN (SELECT id FROM groups WHERE owner_id = %s)", (user_id,))
+        if db_type == 'postgres': cur.execute('DELETE FROM group_members WHERE group_id IN (SELECT id FROM "groups" WHERE owner_id = %s)', (user_id,))
+        else: cur.execute("DELETE FROM group_members WHERE group_id IN (SELECT id FROM `groups` WHERE owner_id = %s)", (user_id,))
         cur.execute("DELETE FROM group_members WHERE user_id = %s", (user_id,))
         cur.execute("DELETE FROM groups WHERE owner_id = %s", (user_id,))
         cur.execute("DELETE FROM users WHERE id = %s", (user_id,))

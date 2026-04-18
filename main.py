@@ -41,7 +41,7 @@ def wipe_databases():
         neo = GraphDatabase.driver("bolt://neo4j:7687", auth=("neo4j", "password"))
         with neo.session() as s:
             # 1. Delete all data in batches to prevent out-of-memory errors on 'Big' dataset
-            s.run("MATCH (n) CALL { WITH n DETACH DELETE n } IN TRANSACTIONS OF 10000 ROWS")
+            s.run("MATCH (n) CALL (n) { DETACH DELETE n } IN TRANSACTIONS OF 10000 ROWS")
             
             # 2. Dynamically find and drop all constraints
             constraints = s.run("SHOW CONSTRAINTS YIELD name").data()
