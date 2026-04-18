@@ -175,7 +175,7 @@ class BenchmarkOrchestrator:
             "ALTER TABLE users ADD PRIMARY KEY (id);",
             "ALTER TABLE posts ADD PRIMARY KEY (id);",
             "ALTER TABLE comments ADD PRIMARY KEY (id);",
-            "ALTER TABLE groups ADD PRIMARY KEY (id);",
+            'ALTER TABLE "groups" ADD PRIMARY KEY (id);',
             "ALTER TABLE tags ADD PRIMARY KEY (id);",
             "CREATE INDEX idx_post_user ON posts(user_id);",
             "CREATE INDEX idx_comment_post ON comments(post_id);",
@@ -187,7 +187,7 @@ class BenchmarkOrchestrator:
         ]
         for q in pg_queries: 
             try: pg_cur.execute(q)
-            except: pass
+            except: print(f"Indexing query failed: {q}")
 
         # 2. MySQL Indexes
         my_cur = self.my_conn.cursor()
@@ -195,7 +195,7 @@ class BenchmarkOrchestrator:
             "ALTER TABLE users ADD PRIMARY KEY (id);",
             "ALTER TABLE posts ADD PRIMARY KEY (id);",
             "ALTER TABLE comments ADD PRIMARY KEY (id);",
-            "ALTER TABLE groups ADD PRIMARY KEY (id);",
+            "ALTER TABLE `groups` ADD PRIMARY KEY (id);",
             "ALTER TABLE tags ADD PRIMARY KEY (id);",
             "CREATE INDEX idx_post_user ON posts(user_id);",
             "CREATE INDEX idx_comment_post ON comments(post_id);",

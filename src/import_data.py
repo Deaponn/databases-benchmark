@@ -66,7 +66,6 @@ REL_QUERIES = {
 class ImportOrchestrator:
     def __init__(self, dataset_size):
         self.size = dataset_size # 'small', 'medium', or 'big'
-        self.data_path = f"/data/{dataset_size}" # Path inside the container
 
     def import_all(self, drop_indexes_after=True):
         self.import_postgres()
@@ -74,26 +73,27 @@ class ImportOrchestrator:
         self.import_mongo()
         self.import_neo4j(drop_indexes_after)
 
-    def load_csv(self, name):
-        with open(f"data/{self.size}/{name}.csv", 'r', encoding='utf-8') as f:
-            return list(csv.DictReader(f))
-
     @timer
     def import_postgres(self):
         conn = psycopg2.connect(dbname="benchmark_db", user="user", password="password", host="postgres")
         cur = conn.cursor()
+        cur.execute("SET synchronous_commit = off;")
         
         for table, schema in SQL_TABLES.items():
-            data = self.load_csv(table)
-            if not data: continue
+            file_path = f"/app/data/{self.size}/{table}.csv"
+            if not os.path.exists(file_path): continue
             
             pg_schema = schema.replace("JSON", "JSONB")
-            cur.execute(f"DROP TABLE IF EXISTS {table} CASCADE;")
-            cur.execute(f"CREATE TABLE {table} ({pg_schema});")
+            # Enclose "groups" in quotes to avoid reserved keyword errors
+            table_name = f'"{table}"' if table == "groups" else table
             
-            cols = data[0].keys()
-            placeholders = ", ".join([f"%({c})s" for c in cols])
-            cur.executemany(f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({placeholders})", data)
+            cur.execute(f"DROP TABLE IF EXISTS {table_name} CASCADE;")
+            cur.execute(f"CREATE TABLE {table_name} ({pg_schema});")
+            
+            # High-speed COPY, noting that the CSV now has a header
+            with open(file_path, 'r', encoding='utf-8') as f:
+                sql = f"COPY {table_name} FROM STDIN WITH (FORMAT CSV, HEADER true, QUOTE '\"', DELIMITER ',')"
+                cur.copy_expert(sql, f)
             
         conn.commit()
         cur.close()
@@ -101,24 +101,27 @@ class ImportOrchestrator:
 
     @timer
     def import_mysql(self):
-        conn = mysql_connect(host='mysql', user='root', password='password', database='benchmark_db')
+        conn = mysql_connect(host='mysql', user='root', password='password', database='benchmark_db', allow_local_infile=True)
         cur = conn.cursor()
-        cur.execute("SET FOREIGN_KEY_CHECKS = 0;")
         
         for table, schema in SQL_TABLES.items():
-            data = self.load_csv(table)
-            if not data: continue
+            file_path = f"/var/lib/mysql-files/{self.size}/{table}.csv"
+            table_name = f"`{table}`"
             
-            cur.execute(f"DROP TABLE IF EXISTS `{table}`;")
-            cur.execute(f"CREATE TABLE `{table}` ({schema});")
+            cur.execute(f"DROP TABLE IF EXISTS {table_name};")
+            cur.execute(f"CREATE TABLE {table_name} ({schema});")
             
-            cols = data[0].keys()
-            placeholders = ", ".join(["%s"] * len(cols))
+            query = f"""
+                LOAD DATA INFILE '{file_path}' 
+                INTO TABLE {table_name} 
+                FIELDS TERMINATED BY ',' 
+                ENCLOSED BY '"' 
+                ESCAPED BY '"' 
+                LINES TERMINATED BY '\\r\\n' 
+                IGNORE 1 ROWS
+            """
+            cur.execute(query)
             
-            tuples = [tuple(d[c] for c in cols) for d in data]
-            cur.executemany(f"INSERT INTO `{table}` ({', '.join(cols)}) VALUES ({placeholders})", tuples)
-            
-        cur.execute("SET FOREIGN_KEY_CHECKS = 1;")
         conn.commit()
         cur.close()
         conn.close()
@@ -128,8 +131,9 @@ class ImportOrchestrator:
         client = MongoClient("mongodb://mongodb:27017/")
         db = client["benchmark_db"]
 
-        for table in ["users", "posts", "comments", "post_likes", "comment_likes", "followers", "groups", "group_members", "tags", "post_tags"]:
+        for table in FIELD_MAP.keys():
             path = f"/app/data/{self.size}/{table}.csv"
+            if not os.path.exists(path): continue
 
             db[table].drop()
             documents = []
@@ -139,14 +143,13 @@ class ImportOrchestrator:
 
                 for row in reader:
                     doc = {}
-                    
                     for key, value in row.items():
                         if key.endswith('_id') or key == 'id':
                             doc[key] = int(value)
                         elif key.endswith('_at'):
                             doc[key] = datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
                         elif key == 'settings_json':
-                            doc[key] = json.loads(value)
+                            doc[key] = json.loads(value.replace('""', '"'))
                         else:
                             doc[key] = value
 

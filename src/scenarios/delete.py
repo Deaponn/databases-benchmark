@@ -116,7 +116,8 @@ def d6_nuke_user(db_type, conn, user_id):
         if db_type == 'postgres': cur.execute('DELETE FROM group_members WHERE group_id IN (SELECT id FROM "groups" WHERE owner_id = %s)', (user_id,))
         else: cur.execute("DELETE FROM group_members WHERE group_id IN (SELECT id FROM `groups` WHERE owner_id = %s)", (user_id,))
         cur.execute("DELETE FROM group_members WHERE user_id = %s", (user_id,))
-        cur.execute("DELETE FROM groups WHERE owner_id = %s", (user_id,))
+        if db_type == 'postgres': cur.execute('DELETE FROM "groups" WHERE owner_id = %s', (user_id,))
+        else: cur.execute("DELETE FROM `groups` WHERE owner_id = %s", (user_id,))
         cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
         conn.commit()
 

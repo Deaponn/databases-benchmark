@@ -1,3 +1,6 @@
+import os
+import sys
+import glob
 import time
 import psycopg2
 import mysql.connector
@@ -40,18 +43,14 @@ def wipe_databases():
     try:
         neo = GraphDatabase.driver("bolt://neo4j:7687", auth=("neo4j", "password"))
         with neo.session() as s:
-            # 1. Delete all data in batches to prevent out-of-memory errors on 'Big' dataset
             s.run("MATCH (n) CALL (n) { DETACH DELETE n } IN TRANSACTIONS OF 10000 ROWS")
             
-            # 2. Dynamically find and drop all constraints
             constraints = s.run("SHOW CONSTRAINTS YIELD name").data()
             for c in constraints:
                 s.run(f"DROP CONSTRAINT {c['name']}")
                 
-            # 3. Dynamically find and drop all user-created indexes
             indexes = s.run("SHOW INDEXES YIELD name").data()
             for i in indexes:
-                # Ignore Neo4j's internal default token lookup indexes
                 if "lookup" not in i['name'].lower():
                     try:
                         s.run(f"DROP INDEX {i['name']}")
@@ -63,7 +62,23 @@ def wipe_databases():
 
 
 def main():
-    # Make sure you have generated the data first!
+    # --- STRICT CHECK LOGIC ---
+    existing_results = glob.glob("results/*.csv")
+    if existing_results:
+        print("\n--- PREVIOUS RESULTS FOUND ---")
+        for f in existing_results:
+            print(f" - {f}")
+            
+        choice = input("\nDo you want to DELETE these previous results and start fresh? (y/n) [Default: n]: ").strip().lower()
+        if choice == 'y':
+            for f in existing_results:
+                os.remove(f)
+            print(">>> Old results deleted. Starting fresh.")
+        else:
+            print(">>> Exiting script to preserve existing results. Please move them to another folder if you want to run the benchmark again.")
+            sys.exit(0) # Halts execution completely
+    # --------------------------
+
     datasets = ['small', 'medium', 'big']
     
     for size in datasets:
@@ -74,7 +89,7 @@ def main():
         # 1. WIPE
         print(f"\n[1/5] WIPING DATABASES FOR CLEAN SLATE")
         wipe_databases()
-        time.sleep(3) # Give engines a moment to free up memory/disk locks
+        time.sleep(3) 
         
         # 2. IMPORT
         print(f"\n[2/5] IMPORTING {size.upper()} DATASET (NO INDEXES)")
@@ -83,7 +98,6 @@ def main():
         
         # 3. BENCHMARK (NO INDEXES)
         print(f"\n[3/5] RUNNING BENCHMARKS: UNINDEXED")
-        # Instantiate orchestrator AFTER import so it successfully fetches the new MAX(id)s
         tester = BenchmarkOrchestrator(size)
         tester.run_benchmarks(f"results_not_indexed_{size}.csv")
         
@@ -95,7 +109,6 @@ def main():
         print(f"\n[5/5] RUNNING BENCHMARKS: INDEXED")
         tester.run_benchmarks(f"results_indexed_{size}.csv")
         
-        # Cleanup connections for this dataset pass
         tester.close()
         print(f"\n>>> FINISHED PIPELINE FOR {size.upper()} <<<")
 
