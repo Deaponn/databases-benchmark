@@ -18,15 +18,14 @@ class BenchmarkOrchestrator:
     def __init__(self, size_preset='small'):
         self.size = size_preset
         
+        random.seed(42)
+        
         # Connections
         self.pg_conn = psycopg2.connect(host="postgres", user="user", password="password", dbname="benchmark_db")
-        self.pg_conn.autocommit = True  # Required for some index operations
-        
+        self.pg_conn.autocommit = True  
         self.my_conn = mysql.connector.connect(host="mysql", user="root", password="password", database="benchmark_db")
-        
         self.mongo_client = MongoClient("mongodb://mongodb:27017")
         self.mongo_db = self.mongo_client["benchmark_db"]
-        
         self.neo4j_driver = GraphDatabase.driver("bolt://neo4j:7687", auth=("neo4j", "password"))
 
         self.databases = {
@@ -36,60 +35,78 @@ class BenchmarkOrchestrator:
             'neo4j': self.neo4j_driver
         }
 
-        # ID State for Inserts/Deletes (To avoid conflicts during repeated tests)
-        self.max_user_id = 9000000
-        self.max_post_id = 9000000
-        self.max_comment_id = 9000000
-        self.max_group_id = 9000000
+        # Dynamically fetch max IDs from Postgres (assuming all DBs have identical imported data)
+        self._fetch_max_ids()
+        
+        # Track IDs used in Deletes to prevent deleting the same record in Phase 1 and Phase 2
+        self.used_delete_uids = set()
+        self.used_delete_pids = set()
+        self.used_delete_cids = set()
+        self.used_delete_gids = set()
+
+    def _fetch_max_ids(self):
+        cur = self.pg_conn.cursor()
+        cur.execute("SELECT MAX(id) FROM users")
+        self.max_user_id = cur.fetchone()[0] or 0
+        cur.execute("SELECT MAX(id) FROM posts")
+        self.max_post_id = cur.fetchone()[0] or 0
+        cur.execute("SELECT MAX(id) FROM comments")
+        self.max_comment_id = cur.fetchone()[0] or 0
+        cur.execute("SELECT MAX(id) FROM groups")
+        self.max_group_id = cur.fetchone()[0] or 0
+        cur.close()
+
+    def _get_unique_target(self, max_val, used_set):
+        """Picks a random ID from 1 to max_val that hasn't been deleted yet."""
+        while True:
+            val = random.randint(1, max_val)
+            if val not in used_set:
+                used_set.add(val)
+                return val
 
     def get_random_params(self, scenario_name):
-        """Generates dynamic parameters based on the scenario to ensure fair testing."""
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
         if scenario_name.startswith('r'):
-            # Read operations can safely reuse random existing IDs
             return {
-                'r1': [random.randint(1, 2000)],
+                'r1': [random.randint(1, self.max_user_id)],
                 'r2': [],
-                'r3': [random.randint(1, 5000)],
+                'r3': [random.randint(1, self.max_post_id)],
                 'r4': ['tech'],
-                'r5': [random.randint(1, 2000)],
+                'r5': [random.randint(1, self.max_user_id)],
                 'r6': []
             }.get(scenario_name.split('_')[0], [])
             
         elif scenario_name.startswith('c'):
-            # Creates need NEW IDs every time
             self.max_user_id += 1; self.max_post_id += 1; self.max_comment_id += 1; self.max_group_id += 1
             return {
-                'c1': [(self.max_user_id, f"test_user_{self.max_user_id}", "test@test.com", "pass", now, f'{{"theme": {"light" if self.max_user_id % 4 == 0 else "dark"}}}')],
+                'c1': [(self.max_user_id, f"test_user_{self.max_user_id}", "test@test.com", "pass", now, '{"theme": "dark"}')],
                 'c2': [(self.max_post_id, 1, "Benchmark Post", now), [1, 2, 3]],
-                'c3': [self.max_user_id, 1], # New user follows User 1
+                'c3': [self.max_user_id, 1],
                 'c4': [(self.max_comment_id, 1, 1, "Benchmark Comment", now)],
                 'c5': [(self.max_group_id, f"Group {self.max_group_id}", "Desc", 1)],
-                'c6': [1, self.max_user_id] # New user joins Group 1
+                'c6': [1, self.max_user_id] 
             }.get(scenario_name.split('_')[0], [])
             
         elif scenario_name.startswith('u'):
-            # Updates use random existing IDs
-            uid = random.randint(1, 2000)
+            uid = random.randint(1, self.max_user_id)
             return {
                 'u1': [uid, f"updated_name_{random.randint(1,999)}"],
                 'u2': [uid, f"new_pass_{random.randint(1,999)}"],
                 'u3': [uid, random.choice(['light', 'dark'])],
                 'u4': [uid, "[CENSORED BY ADMIN]"],
-                'u5': [1, f"tech_{random.randint(1,999)}"], # Update Tag 1
+                'u5': [1, f"tech_{random.randint(1,999)}"],
                 'u6': [1, "New Group Name", "New Desc", uid]
             }.get(scenario_name.split('_')[0], [])
             
         elif scenario_name.startswith('d'):
-            # Deletes need VALID TARGETS. We pick high IDs that we know exist but aren't critical
-            target_uid = random.randint(2001, 2400)
-            target_pid = random.randint(5001, 5500)
-            target_cid = random.randint(5001, 5500)
-            target_gid = random.randint(11, 20)
+            target_uid = self._get_unique_target(self.max_user_id, self.used_delete_uids)
+            target_pid = self._get_unique_target(self.max_post_id, self.used_delete_pids)
+            target_cid = self._get_unique_target(self.max_comment_id, self.used_delete_cids)
+            target_gid = self._get_unique_target(self.max_group_id, self.used_delete_gids)
             return {
-                'd1': [1, target_uid], # Unfollow
-                'd2': [1, target_uid], # Delete like
+                'd1': [1, target_uid], 
+                'd2': [target_pid, 1], 
                 'd3': [target_cid],
                 'd4': [target_pid],
                 'd5': [target_gid],
@@ -97,7 +114,7 @@ class BenchmarkOrchestrator:
             }.get(scenario_name.split('_')[0], [])
 
     def execute_scenario(self, db_type, conn, func, params):
-        """Wrapper to execute the function correctly."""
+        # The timer only surrounds the database query execution
         start = time.perf_counter()
         func(db_type, conn, *params)
         end = time.perf_counter()
@@ -129,24 +146,24 @@ class BenchmarkOrchestrator:
             writer = csv.writer(f)
             writer.writerow(["database", "scenario", "entry_index", "avg_time_seconds"])
 
-            for db_type, conn in self.databases.items():
-                print(f"\nTesting Engine: {db_type.upper()}")
+            for func, name in scenarios:
+                print(f"Executing {name}...")
                 
-                for func, name in scenarios:
-                    print(f"  Running {name}...")
-                    
-                    # 3 result entries
-                    for entry_idx in range(1, 4):
+                # Pre-generate a 3x3 matrix of parameters for this scenario.
+                # This guarantees that Postgres, MySQL, Mongo, and Neo4j all 
+                # execute the exact same queries with the exact same targets.
+                batch_params = [[self.get_random_params(name) for _ in range(3)] for _ in range(3)]
+                
+                for db_type, conn in self.databases.items():
+                    for entry_idx in range(3):
                         total_time = 0.0
                         
-                        # 3 executions per entry to average out
-                        for _ in range(3):
-                            # Get fresh parameters (critical for Creates and Deletes)
-                            params = self.get_random_params(name)
+                        for exec_idx in range(3):
+                            params = batch_params[entry_idx][exec_idx]
                             total_time += self.execute_scenario(db_type, conn, func, params)
                             
                         avg_time = total_time / 3.0
-                        writer.writerow([db_type, name, entry_idx, f"{avg_time:.6f}"])
+                        writer.writerow([db_type, name, entry_idx + 1, f"{avg_time:.6f}"])
 
     def create_all_indexes(self):
         """Applies primary keys and indexes for the 'Indexed' benchmark phase."""
@@ -166,11 +183,11 @@ class BenchmarkOrchestrator:
             "CREATE INDEX idx_followers_tid ON followers(followed_id);",
             "CREATE INDEX idx_post_tags_tid ON post_tags(tag_id);",
             "CREATE INDEX idx_group_members_uid ON group_members(user_id);",
-            "CREATE INDEX idx_user_settings ON users USING GIN (settings_json);" # JSON Index
+            "CREATE INDEX idx_user_settings ON users USING GIN (settings_json);" 
         ]
         for q in pg_queries: 
             try: pg_cur.execute(q)
-            except: pass # Ignore if already exists
+            except: pass
 
         # 2. MySQL Indexes
         my_cur = self.my_conn.cursor()
@@ -186,7 +203,6 @@ class BenchmarkOrchestrator:
             "CREATE INDEX idx_followers_tid ON followers(followed_id);",
             "CREATE INDEX idx_post_tags_tid ON post_tags(tag_id);",
             "CREATE INDEX idx_group_members_uid ON group_members(user_id);"
-            # MySQL 8+ JSON indexing requires creating a virtual column, skipping for parity with PG basic index
         ]
         for q in my_queries:
             try: my_cur.execute(q)
@@ -202,9 +218,9 @@ class BenchmarkOrchestrator:
         self.mongo_db.followers.create_index("followed_id")
         self.mongo_db.group_members.create_index("user_id")
         self.mongo_db.post_tags.create_index("tag_id")
-        self.mongo_db.users.create_index("settings_json.theme") # JSON Index
+        self.mongo_db.users.create_index("settings_json.theme")
 
-        # 4. Neo4j Indexes (Constraints usually act as indexes for nodes)
+        # 4. Neo4j Constraints
         neo4j_queries = [
             "CREATE CONSTRAINT IF NOT EXISTS FOR (u:User) REQUIRE u.id IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (p:Post) REQUIRE p.id IS UNIQUE",
@@ -229,17 +245,10 @@ class BenchmarkOrchestrator:
 
 if __name__ == "__main__":
     orchestrator = BenchmarkOrchestrator('small')
-    
     try:
-        # Phase 1: Benchmark without Indexes
         orchestrator.run_benchmarks("results_not_indexed.csv")
-        
-        # Phase 2: Add Indexes
         orchestrator.create_all_indexes()
-        
-        # Phase 3: Benchmark with Indexes
         orchestrator.run_benchmarks("results_indexed.csv")
-        
     finally:
         orchestrator.close()
         print("\nBenchmarking Complete. Check the /results folder.")

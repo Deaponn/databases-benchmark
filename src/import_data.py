@@ -45,7 +45,7 @@ FIELD_MAP = {
 CONSTRAINTS = ["User", "Post", "Comment", "Group", "Tag"]
 
 NODE_QUERIES = {
-    "users.csv": "CREATE (:User {id: toInteger(row.id), username: row.username, email: row.email})",
+    "users.csv": "CREATE (:User {id: toInteger(row.id), username: row.username, email: row.email, password: row.password, created_at: row.created_at, settings_json: row.settings_json})",
     "posts.csv": "CREATE (:Post {id: toInteger(row.id), content: row.content, created_at: row.created_at})",
     "comments.csv": "CREATE (:Comment {id: toInteger(row.id), content: row.content, created_at: row.created_at})",
     "groups.csv": "CREATE (:Group {id: toInteger(row.id), name: row.name, description: row.description})",
