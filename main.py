@@ -7,7 +7,6 @@ import mysql.connector
 from pymongo import MongoClient
 from neo4j import GraphDatabase
 
-# Import your orchestrators
 from import_data import ImportOrchestrator
 from run_tests import BenchmarkOrchestrator
 
@@ -39,30 +38,28 @@ def wipe_databases():
     except Exception as e:
         print(f"     Mongo Wipe Error: {e}")
 
-    print("  -> Wiping Neo4j (Nodes, Relationships, Constraints, Indexes)...")
+    print("  -> Wiping Neo4j (Aggressive Cleanup)...")
     try:
         neo = GraphDatabase.driver("bolt://neo4j:7687", auth=("neo4j", "password"))
         with neo.session() as s:
-            s.run("MATCH (n) CALL (n) { DETACH DELETE n } IN TRANSACTIONS OF 10000 ROWS")
-            
-            constraints = s.run("SHOW CONSTRAINTS YIELD name").data()
+            constraints = s.run("SHOW CONSTRAINTS").data()
             for c in constraints:
-                s.run(f"DROP CONSTRAINT {c['name']}")
-                
-            indexes = s.run("SHOW INDEXES YIELD name").data()
+                s.run(f"DROP CONSTRAINT `{c['name']}`")
+
+            indexes = s.run("SHOW INDEXES").data()
             for i in indexes:
-                if "lookup" not in i['name'].lower():
-                    try:
-                        s.run(f"DROP INDEX {i['name']}")
-                    except:
-                        pass
+                if i.get('type') != 'LOOKUP':
+                    s.run(f"DROP INDEX `{i['name']}`")
+
+            s.run("MATCH (n) CALL { WITH n DETACH DELETE n } IN TRANSACTIONS OF 10000 ROWS")
+            
         neo.close()
+        time.sleep(2)
     except Exception as e:
         print(f"     Neo4j Wipe Error: {e}")
 
 
 def main():
-    # --- STRICT CHECK LOGIC ---
     existing_results = glob.glob("results/*.csv")
     if existing_results:
         print("\n--- PREVIOUS RESULTS FOUND ---")
@@ -76,8 +73,7 @@ def main():
             print(">>> Old results deleted. Starting fresh.")
         else:
             print(">>> Exiting script to preserve existing results. Please move them to another folder if you want to run the benchmark again.")
-            sys.exit(0) # Halts execution completely
-    # --------------------------
+            sys.exit(0)
 
     datasets = ['small', 'medium', 'big']
     

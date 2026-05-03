@@ -144,26 +144,16 @@ class BenchmarkOrchestrator:
         os.makedirs("results", exist_ok=True)
         with open(f"results/{output_file}", "w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(["database", "scenario", "entry_index", "avg_time_seconds"])
+            writer.writerow(["database", "scenario", "entry_index", "exec_time_seconds"])
 
             for func, name in scenarios:
                 print(f"Executing {name}...")
-                
-                # Pre-generate a 3x3 matrix of parameters for this scenario.
-                # This guarantees that Postgres, MySQL, Mongo, and Neo4j all 
-                # execute the exact same queries with the exact same targets.
-                batch_params = [[self.get_random_params(name) for _ in range(3)] for _ in range(3)]
+                scenario_batch = [self.get_random_params(name) for _ in range(5)]
                 
                 for db_type, conn in self.databases.items():
-                    for entry_idx in range(3):
-                        total_time = 0.0
-                        
-                        for exec_idx in range(3):
-                            params = batch_params[entry_idx][exec_idx]
-                            total_time += self.execute_scenario(db_type, conn, func, params)
-                            
-                        avg_time = total_time / 3.0
-                        writer.writerow([db_type, name, entry_idx + 1, f"{avg_time:.6f}"])
+                    for entry_idx, params in enumerate(scenario_batch, 1):
+                        exec_time = self.execute_scenario(db_type, conn, func, params)
+                        writer.writerow([db_type, name, entry_idx, f"{exec_time:.6f}"])
 
     def create_all_indexes(self):
         """Applies primary keys and indexes for the 'Indexed' benchmark phase."""
