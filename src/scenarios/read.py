@@ -1,6 +1,41 @@
 import json
 
-def r1_friends_of_friends(db_type, conn, user_id):
+# Globalne prefiksy do analizy zapytań
+MY_SQL_EXPLAIN_PREFIX = "EXPLAIN FORMAT=JSON "
+POSTGRES_EXPLAIN_PREFIX = "EXPLAIN (FORMAT JSON) "
+NEO4J_EXPLAIN_PREFIX = "PROFILE "  # PROFILE faktycznie wykonuje zapytanie i zbiera statystyki (np. DbHits)
+
+
+def _execute_sql(db_type, conn, query, params=None, explain=False):
+    """
+    Funkcja pomocnicza dla MySQL i PostgreSQL, która obsługuje doklejanie 
+    prefiksu EXPLAIN, wykonanie zapytania oraz formatowanie wyniku.
+    """
+    if explain:
+        prefix = POSTGRES_EXPLAIN_PREFIX if db_type == 'postgres' else MY_SQL_EXPLAIN_PREFIX
+        query = prefix + query
+
+    cur = conn.cursor()
+    if params:
+        cur.execute(query, params)
+    else:
+        cur.execute(query)
+
+    if explain:
+        # EXPLAIN zwraca jeden wiersz z wynikiem planu
+        result = cur.fetchone()[0]
+        # MySQL zwraca JSON jako string, więc dla wygody parsujemy go na słownik
+        if db_type == 'mysql' and isinstance(result, str):
+            try:
+                return json.loads(result)
+            except json.JSONDecodeError:
+                return result
+        return result
+    
+    return cur.fetchall()
+
+
+def r1_friends_of_friends(db_type, conn, user_id, explain=False):
     """Scenario R1: Retrieving the full friend list for each friend of a given user."""
 
     if db_type in ['postgres', 'mysql']:
@@ -10,9 +45,7 @@ def r1_friends_of_friends(db_type, conn, user_id):
             JOIN followers f2 ON f1.followed_id = f2.follower_id 
             WHERE f1.follower_id = %s;
         """
-        cur = conn.cursor()
-        cur.execute(query, (user_id,))
-        return cur.fetchall()
+        return _execute_sql(db_type, conn, query, (user_id,), explain)
 
     elif db_type == 'mongodb':
         pipeline = [
@@ -26,38 +59,50 @@ def r1_friends_of_friends(db_type, conn, user_id):
             {"$unwind": "$fof"},
             {"$project": {"followed_id": "$fof.followed_id"}}
         ]
+        if explain:
+            # Dla agregacji używamy parametru explain=True, co zwraca plan jako jedyny dokument
+            return next(conn.followers.aggregate(pipeline, explain=True))
         return list(conn.followers.aggregate(pipeline))
 
     elif db_type == 'neo4j':
-        query = "MATCH (u:User {id: $id})-[:FOLLOWS]->()-[:FOLLOWS]->(fof) RETURN DISTINCT fof.id"
+        base_query = "MATCH (u:User {id: $id})-[:FOLLOWS]->()-[:FOLLOWS]->(fof) RETURN DISTINCT fof.id"
+        query = (NEO4J_EXPLAIN_PREFIX + base_query) if explain else base_query
+        
         with conn.session() as session:
-            return session.run(query, id=user_id).data()
+            result = session.run(query, id=user_id)
+            if explain:
+                return result.consume().profile
+            return result.data()
 
 
-def r2_json_filtering(db_type, conn):
+def r2_json_filtering(db_type, conn, explain=False):
     """Scenario R2: Finding the IDs of users who have dark mode enabled."""
     if db_type == 'postgres':
         query = "SELECT id FROM users WHERE settings_json->>'theme' = 'dark' LIMIT 100;"
-        cur = conn.cursor()
-        cur.execute(query)
-        return cur.fetchall()
+        return _execute_sql(db_type, conn, query, None, explain)
 
     elif db_type == 'mysql':
         query = "SELECT id FROM users WHERE settings_json->'$.theme' = 'dark' LIMIT 100;"
-        cur = conn.cursor()
-        cur.execute(query)
-        return cur.fetchall()
+        return _execute_sql(db_type, conn, query, None, explain)
 
     elif db_type == 'mongodb':
+        if explain:
+            # Dla standardowego find() używamy metody .explain()
+            return conn.users.find({"settings_json.theme": "dark"}, {"id": 1}).limit(100).explain("executionStats")
         return list(conn.users.find({"settings_json.theme": "dark"}, {"id": 1}).limit(100))
 
     elif db_type == 'neo4j':
-        query = "MATCH (u:User) WHERE u.settings_json CONTAINS '\"theme\": \"dark\"' RETURN u.id LIMIT 100"
+        base_query = "MATCH (u:User) WHERE u.settings_json CONTAINS '\"theme\": \"dark\"' RETURN u.id LIMIT 100"
+        query = (NEO4J_EXPLAIN_PREFIX + base_query) if explain else base_query
+        
         with conn.session() as session:
-            return session.run(query).data()
+            result = session.run(query)
+            if explain:
+                return result.consume().profile
+            return result.data()
 
 
-def r3_post_engagement(db_type, conn, post_id):
+def r3_post_engagement(db_type, conn, post_id, explain=False):
     """Scenario R3: Retrieving likes, comments, and comment likes for a given post."""
     if db_type in ['postgres', 'mysql']:
         query = """
@@ -69,9 +114,7 @@ def r3_post_engagement(db_type, conn, post_id):
             LEFT JOIN comments c ON p.id = c.post_id
             WHERE p.id = %s;
         """
-        cur = conn.cursor()
-        cur.execute(query, (post_id,))
-        return cur.fetchall()
+        return _execute_sql(db_type, conn, query, (post_id,), explain)
 
     elif db_type == 'mongodb':
         pipeline = [
@@ -83,10 +126,12 @@ def r3_post_engagement(db_type, conn, post_id):
                 "comments": "$coms"
             }}
         ]
+        if explain:
+            return next(conn.posts.aggregate(pipeline, explain=True))
         return list(conn.posts.aggregate(pipeline))
 
     elif db_type == 'neo4j':
-        query = """
+        base_query = """
             MATCH (p:Post {id: $id})
             OPTIONAL MATCH (p)<-[:ON_POST]-(c:Comment)
             RETURN p.id, 
@@ -94,11 +139,16 @@ def r3_post_engagement(db_type, conn, post_id):
                    c.content, 
                    COUNT { (c)<-[:LIKES_COMMENT]-() } as comment_likes
         """
+        query = (NEO4J_EXPLAIN_PREFIX + base_query) if explain else base_query
+        
         with conn.session() as session:
-            return session.run(query, id=post_id).data()
+            result = session.run(query, id=post_id)
+            if explain:
+                return result.consume().profile
+            return result.data()
 
 
-def r4_tagged_posts(db_type, conn, tag_name):
+def r4_tagged_posts(db_type, conn, tag_name, explain=False):
     """Scenario R4: Retrieving the latest 10 posts with specified tag."""
     if db_type in ['postgres', 'mysql']:
         query = """
@@ -109,9 +159,7 @@ def r4_tagged_posts(db_type, conn, tag_name):
             WHERE t.name = %s
             ORDER BY p.created_at DESC LIMIT 10;
         """
-        cur = conn.cursor()
-        cur.execute(query, (tag_name,))
-        return cur.fetchall()
+        return _execute_sql(db_type, conn, query, (tag_name,), explain)
 
     elif db_type == 'mongodb':
         pipeline = [
@@ -123,19 +171,26 @@ def r4_tagged_posts(db_type, conn, tag_name):
             {"$sort": {"post.created_at": -1}},
             {"$limit": 10}
         ]
+        if explain:
+            return next(conn.tags.aggregate(pipeline, explain=True))
         return list(conn.tags.aggregate(pipeline))
 
     elif db_type == 'neo4j':
-        query = """
+        base_query = """
             MATCH (t:Tag {name: $tag_name})<-[:HAS_TAG]-(p:Post)
             RETURN p.content, p.created_at 
             ORDER BY p.created_at DESC LIMIT 10
         """
+        query = (NEO4J_EXPLAIN_PREFIX + base_query) if explain else base_query
+        
         with conn.session() as session:
-            return session.run(query, tag_name=tag_name).data()
+            result = session.run(query, tag_name=tag_name)
+            if explain:
+                return result.consume().profile
+            return result.data()
 
 
-def r5_social_feed(db_type, conn, user_id):
+def r5_social_feed(db_type, conn, user_id, explain=False):
     """Scenario R5: Feed from friends and mutual group members."""
     if db_type in ['postgres', 'mysql']:
         query = """
@@ -150,9 +205,7 @@ def r5_social_feed(db_type, conn, user_id):
                )
             ORDER BY p.created_at DESC LIMIT 20;
         """
-        cur = conn.cursor()
-        cur.execute(query, (user_id, user_id))
-        return cur.fetchall()
+        return _execute_sql(db_type, conn, query, (user_id, user_id), explain)
 
     elif db_type == 'mongodb':
         pipeline = [
@@ -198,27 +251,32 @@ def r5_social_feed(db_type, conn, user_id):
             {"$limit": 20}
         ]
         
+        if explain:
+            return next(conn.users.aggregate(pipeline, explain=True))
         return list(conn.users.aggregate(pipeline))
 
     elif db_type == 'neo4j':
-        query = """
+        base_query = """
             MATCH (u:User {id: $id})
             MATCH (u)-[:FOLLOWS|MEMBER_OF*1..2]-(other:User)-[:POSTED]->(p:Post)
             WHERE other <> u
             RETURN DISTINCT p.id, p.content, p.created_at
             ORDER BY p.created_at DESC LIMIT 20
         """
+        query = (NEO4J_EXPLAIN_PREFIX + base_query) if explain else base_query
+        
         with conn.session() as session:
-            return session.run(query, id=user_id).data()
+            result = session.run(query, id=user_id)
+            if explain:
+                return result.consume().profile
+            return result.data()
 
 
-def r6_most_popular_users(db_type, conn):
+def r6_most_popular_users(db_type, conn, explain=False):
     """Scenario R6: Finding the top 10 most popular users (most followers)."""
     if db_type in ['postgres', 'mysql']:
         query = "SELECT followed_id, COUNT(*) as cnt FROM followers GROUP BY followed_id ORDER BY cnt DESC LIMIT 10;"
-        cur = conn.cursor()
-        cur.execute(query)
-        return cur.fetchall()
+        return _execute_sql(db_type, conn, query, None, explain)
 
     elif db_type == 'mongodb':
         pipeline = [
@@ -226,9 +284,16 @@ def r6_most_popular_users(db_type, conn):
             {"$sort": {"count": -1}},
             {"$limit": 10}
         ]
+        if explain:
+            return next(conn.followers.aggregate(pipeline, explain=True))
         return list(conn.followers.aggregate(pipeline))
 
     elif db_type == 'neo4j':
-        query = "MATCH (u:User)<-[:FOLLOWS]-() RETURN u.id, count(*) as cnt ORDER BY cnt DESC LIMIT 10"
+        base_query = "MATCH (u:User)<-[:FOLLOWS]-() RETURN u.id, count(*) as cnt ORDER BY cnt DESC LIMIT 10"
+        query = (NEO4J_EXPLAIN_PREFIX + base_query) if explain else base_query
+        
         with conn.session() as session:
-            return session.run(query).data()
+            result = session.run(query)
+            if explain:
+                return result.consume().profile
+            return result.data()
